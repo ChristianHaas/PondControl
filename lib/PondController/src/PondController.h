@@ -31,7 +31,10 @@ public:
     // Apply all settings at once — persists and logs only once
     void applySettings(int feed1, int feed2, const char* time1, const char* time2, int pumpOffMinutes);
 
-    int getPumpOffMinutes() const { return _pumpOffMinutes; }
+    int  getPumpOffMinutes() const { return _pumpOffMinutes; }
+    bool isPump1On()         const { return _relayPump1->getStatus(); }
+    bool isPump2On()         const { return _relayPump2->getStatus(); }
+    bool isFeederOn()        const { return _relayFeeder->getStatus(); }
 
     // Individual setters (persist to flash — use applySettings when changing multiple)
     void setFeedAmount1(int v);
