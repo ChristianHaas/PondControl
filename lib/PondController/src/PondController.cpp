@@ -71,14 +71,28 @@ void PondController::setFeedTime2(const char* t)
 
 void PondController::handleEvent(eventstruct e)
 {
-    if (e.eventType != event_type_pond) return;
-
-    switch (e.eventCode)
+    // Temperature events from DS18B20 — sensor distinguished by e.val_int (ID)
+    if (e.eventType == event_type_DS18B20)
     {
-    case event_code_pond_update_settings:
-        // settings are applied directly via setFeedAmountX / setFeedTimeX
-        // from main.cpp after parsing the POND_SETTINGS UDP packet
-        break;
+        if (e.eventCode == event_code_DS18B20_TEMP)
+        {
+            if (e.val_int == POND_SENSOR_ID_WATER)
+                _waterTemp = e.val_float;
+            else if (e.val_int == POND_SENSOR_ID_AIR)
+                _airTemp = e.val_float;
+        }
+        return;
+    }
+
+    // Pond-specific events
+    if (e.eventType == event_type_pond)
+    {
+        switch (e.eventCode)
+        {
+        case event_code_pond_update_settings:
+            // settings applied via applySettings() from main.cpp
+            break;
+        }
     }
 }
 

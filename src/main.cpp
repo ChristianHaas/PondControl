@@ -3,7 +3,7 @@
 #include <event.h>
 #include <onewire.h>
 #include <DallasTemperature.h>
-#include <SPI.h>
+#include <DS18B20.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -20,6 +20,10 @@
 #include "ota_config.h"
 #include <Logger.h>
 #include "PondController.h"
+
+// ── Sensor IDs (used in DS18B20 events to identify which sensor fired) ────────
+#define SENSOR_ID_WATER 1
+#define SENSOR_ID_AIR   2
 
 // ── OLED ──────────────────────────────────────────────────────────────────────
 #define SCREEN_WIDTH 128
@@ -42,30 +46,32 @@ WiFiUDP   udp;
 RemoteLogger   *logger;
 PondController *pond;
 EventBus       *eb;
+DS18B20        *tempWater;
+DS18B20        *tempAir;
 
 AsyncWebServer server(OTA_PORT);
 
 static uint32_t messageCounter = 0;
-struct_pond_message pondMsg;
-struct_pond_settings incomingSettings;
+struct_pond_message    pondMsg;
+struct_pond_settings   incomingSettings;
 
 // ── NTP ───────────────────────────────────────────────────────────────────────
-const char* ntpServer       = "pool.ntp.org";
-const long  gmtOffset_sec   = 3600;   // UTC+1 (CET); adjust for your timezone
-const int   daylightOffset  = 3600;   // +1 h DST
+const char* ntpServer      = "pool.ntp.org";
+const long  gmtOffset_sec  = 3600;   // UTC+1 (CET)
+const int   daylightOffset = 3600;   // +1 h DST
 
 // ── UDP send ──────────────────────────────────────────────────────────────────
 void sendPondStatus()
 {
-    pondMsg.msgType       = POND_STATUS;
-    pondMsg.boardId       = ESP32_PondControl;
-    pondMsg.waterTemp     = pond->getWaterTemp();
-    pondMsg.airTemp       = pond->getAirTemp();
-    pondMsg.feedAmount1   = pond->getFeedAmount1();
-    pondMsg.feedAmount2   = pond->getFeedAmount2();
+    pondMsg.msgType        = POND_STATUS;
+    pondMsg.boardId        = ESP32_PondControl;
+    pondMsg.waterTemp      = pond->getWaterTemp();
+    pondMsg.airTemp        = pond->getAirTemp();
+    pondMsg.feedAmount1    = pond->getFeedAmount1();
+    pondMsg.feedAmount2    = pond->getFeedAmount2();
     strlcpy(pondMsg.feedTime1, pond->getFeedTime1(), sizeof(pondMsg.feedTime1));
     strlcpy(pondMsg.feedTime2, pond->getFeedTime2(), sizeof(pondMsg.feedTime2));
-    pondMsg.timestamp     = millis();
+    pondMsg.timestamp      = millis();
     pondMsg.messageCounter = ++messageCounter;
 
     udp.beginPacket(webServerIP, ESP_UDP_PORT);
@@ -97,7 +103,6 @@ void checkWiFiConnection()
         wasDisconnected = false;
         udp.stop();
         udp.begin(ESP_UDP_PORT);
-        // Re-sync NTP after reconnect
         configTime(gmtOffset_sec, daylightOffset, ntpServer);
         Serial.println("WiFi reconnected: " + WiFi.localIP().toString());
         if (logger) logger->log80("WiFi reconnected: " + WiFi.localIP().toString());
@@ -133,7 +138,6 @@ void setup()
     Serial.println("Connected! IP: " + WiFi.localIP().toString());
     WiFi.setSleep(false);
 
-    // Sync time via NTP
     configTime(gmtOffset_sec, daylightOffset, ntpServer);
     Serial.println("NTP sync requested from " + String(ntpServer));
 
@@ -164,12 +168,6 @@ void setup()
         Serial.println("ArduinoOTA ready");
     }
 
-    // DS18B20 — non-blocking async conversion
-    sensors.begin();
-    sensors.setWaitForConversion(false);  // do not block during requestTemperatures()
-    eb = new EventBus();
-    // Temperatures are polled directly in loop() — no EventBus attachment needed.
-
     // OLED
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
     {
@@ -178,10 +176,24 @@ void setup()
     }
     Wire.setTimeOut(3000);
 
-    // Logger + PondController
+    // EventBus + components
+    sensors.begin();
+    eb = new EventBus();
+
+    tempWater = new DS18B20("TempWater", &sensors, addrWater);
+    tempWater->setId(SENSOR_ID_WATER);
+
+    tempAir = new DS18B20("TempAir", &sensors, addrAir);
+    tempAir->setId(SENSOR_ID_AIR);
+
     logger = new RemoteLogger(ESP32_PondControl, webServerIP, ESP_UDP_PORT);
     pond   = new PondController("PondCtrl", &display);
     pond->attachLogger(logger);
+
+    // All components on the EventBus — DS18B20 emits, PondController listens
+    eb->attach(tempWater);
+    eb->attach(tempAir);
+    eb->attachListener(pond);
 
     logger->log80("Pond Controller started: " + WiFi.localIP().toString());
     Serial.println("Setup done");
@@ -196,36 +208,9 @@ void loop()
 
     checkWiFiConnection();
 
-    // DS18B20 non-blocking: request conversion every second,
-    // then read result after ≥800 ms have passed.
-    static unsigned long tempRequestTime = 0;
-    static bool tempRequested = false;
-    unsigned long now = millis();
-
-    if (!tempRequested)
-    {
-        sensors.requestTemperatures();
-        tempRequestTime = now;
-        tempRequested = true;
-    }
-    else if (now - tempRequestTime >= 800)
-    {
-        float wt = sensors.getTempC(addrWater);
-        float at = sensors.getTempC(addrAir);
-        if (wt != DEVICE_DISCONNECTED_C) pond->setWaterTemp(wt);
-        if (at != DEVICE_DISCONNECTED_C) pond->setAirTemp(at);
-        tempRequested = false;  // trigger next request on next iteration
-    }
-
+    // EventBus drives everything: DS18B20 samples async, emits events,
+    // PondController receives them and calls action() at its own interval.
     eb->onLoop();
-
-    // Call PondController action (feeding time check, display update) once per second
-    static unsigned long lastActionTime = 0;
-    if (now - lastActionTime >= 1000)
-    {
-        pond->action();
-        lastActionTime = now;
-    }
 
     // Incoming UDP packets (settings from web server)
     int packetSize = udp.parsePacket();
@@ -250,12 +235,11 @@ void loop()
             {
                 struct_event ev;
                 memcpy(&ev, buf, sizeof(struct_event));
-                logger->log80("Event received, code: " + String(ev.eventCode));
                 eventstruct e = getEvent();
-                e.eventCode  = ev.eventCode;
-                e.eventType  = ev.eventType;
-                e.val_int    = ev.val_int;
-                e.val_float  = ev.val_float;
+                e.eventCode = ev.eventCode;
+                e.eventType = ev.eventType;
+                e.val_int   = ev.val_int;
+                e.val_float = ev.val_float;
                 pond->handleEvent(e);
             }
         }

@@ -5,6 +5,11 @@
 #include <Adafruit_SSD1306.h>
 #include <Preferences.h>
 #include <time.h>
+#include <EventType.h>
+
+// Sensor IDs — must match the IDs set via DS18B20::setId() in main.cpp
+#define POND_SENSOR_ID_WATER 1
+#define POND_SENSOR_ID_AIR   2
 
 class PondController : public BaseComp
 {
