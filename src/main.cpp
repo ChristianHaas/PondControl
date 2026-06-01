@@ -47,9 +47,10 @@ struct_pond_message    pondMsg;
 struct_pond_settings   incomingSettings;
 
 // ── NTP ───────────────────────────────────────────────────────────────────────
-const char* ntpServer      = "pool.ntp.org";
+const char* ntpServer      = "de.pool.ntp.org";  // German pool — faster/more reliable locally
+const char* ntpServer2     = "time.google.com";   // fallback
 const long  gmtOffset_sec  = 3600;   // UTC+1 (CET)
-const int   daylightOffset = 3600;   // +1 h DST
+const int   daylightOffset = 3600;   // +1 h DST (CEST summer)
 
 // ── UDP send ──────────────────────────────────────────────────────────────────
 void sendPondStatus()
@@ -113,7 +114,7 @@ void checkWiFiConnection()
         wasDisconnected = false;
         udp.stop();
         udp.begin(ESP_UDP_PORT);
-        configTime(gmtOffset_sec, daylightOffset, ntpServer);
+        configTime(gmtOffset_sec, daylightOffset, ntpServer, ntpServer2);
         Serial.println("WiFi reconnected: " + WiFi.localIP().toString());
         if (logger) logger->log80("WiFi reconnected: " + WiFi.localIP().toString());
     }
@@ -148,7 +149,7 @@ void setup()
     Serial.println("Connected! IP: " + WiFi.localIP().toString());
     WiFi.setSleep(false);
 
-    configTime(gmtOffset_sec, daylightOffset, ntpServer);
+    configTime(gmtOffset_sec, daylightOffset, ntpServer, ntpServer2);
     Serial.println("NTP sync requested from " + String(ntpServer));
 
     udp.begin(ESP_UDP_PORT);
@@ -188,6 +189,17 @@ void setup()
     // EventBus + components
     sensors.begin();
     eb = new EventBus();
+
+    // Print found DS18B20 addresses on serial so they can be copied into the code
+    int deviceCount = sensors.getDeviceCount();
+    Serial.printf("DS18B20 devices found: %d\n", deviceCount);
+    for (int i = 0; i < deviceCount; i++) {
+        DeviceAddress addr;
+        if (sensors.getAddress(addr, i)) {
+            Serial.printf("  Sensor %d: {0x%02X,0x%02X,0x%02X,0x%02X,0x%02X,0x%02X,0x%02X,0x%02X}\n",
+                i, addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7]);
+        }
+    }
 
     tempWater = new DS18B20("TempWater", &sensors, addrWater);
     tempWater->setId(SENSOR_ID_WATER);
