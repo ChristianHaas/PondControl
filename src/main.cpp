@@ -161,7 +161,14 @@ void setup()
 
         ArduinoOTA.setHostname(OTA_HOSTNAME);
         ArduinoOTA.setPassword(OTA_PASSWORD);
-        ArduinoOTA.onStart([]() { Serial.println("OTA update starting..."); });
+        ArduinoOTA.onStart([]() {
+            Serial.println("OTA update starting...");
+            esp_task_wdt_reset();   // prevent watchdog from firing at start
+        });
+        ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+            esp_task_wdt_reset();   // keep watchdog alive during flash write
+            Serial.printf("OTA progress: %u%%\r", progress * 100 / total);
+        });
         ArduinoOTA.onEnd([]()   { Serial.println("\nOTA update done."); });
         ArduinoOTA.onError([](ota_error_t error) { Serial.printf("OTA error[%u]\n", error); });
         ArduinoOTA.begin();
