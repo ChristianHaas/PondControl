@@ -85,6 +85,9 @@ void sendPondStatus()
         Serial.println("UDP send failed");
 }
 
+// Forward declaration
+bool syncTimeFromWebServer();
+
 // ── WiFi watchdog ─────────────────────────────────────────────────────────────
 void checkWiFiConnection()
 {
