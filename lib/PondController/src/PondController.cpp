@@ -104,6 +104,13 @@ void PondController::checkFeedingTime(struct tm &ti)
     snprintf(now, sizeof(now), "%02d:%02d", ti.tm_hour, ti.tm_min);
     int doy = ti.tm_yday;
 
+    // Debug: log state once per minute (when seconds == 0)
+    if (ti.tm_sec == 0)
+    {
+        Serial.printf("[Feed] now=%s feed1=%s(%dg) feed2=%s(%dg) doy=%d lastDoy1=%d lastDoy2=%d\n",
+            now, _feedTime1, _feedAmount1, _feedTime2, _feedAmount2, doy, _lastFedDoy1, _lastFedDoy2);
+    }
+
     if (strcmp(now, _feedTime1) == 0 && _feedAmount1 > 0 && doy != _lastFedDoy1)
     {
         _lastFedDoy1 = doy;
