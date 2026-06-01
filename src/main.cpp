@@ -197,12 +197,12 @@ void setup()
     Serial.println("Connected! IP: " + WiFi.localIP().toString());
     WiFi.setSleep(false);
 
-    // Set timezone (POSIX TZ string handles both CET winter and CEST summer automatically)
+    // configTime() must come first — it internally resets TZ based on its offset args
+    configTime(0, 0, ntpServer, ntpServer2);
+    // Set correct timezone AFTER configTime() so it isn't overwritten
     setenv("TZ", TZ_STRING, 1);
     tzset();
-    // Try NTP as opportunistic fallback; primary sync is via HTTP from web server
-    configTime(0, 0, ntpServer, ntpServer2);
-    // Sync time from HomeWebServerV2 (reliable on local network, no port 123 needed)
+    // Sync time from HomeWebServerV2 (local HTTP — no NTP/DNS/port-123 needed)
     syncTimeFromWebServer();
 
     udp.begin(ESP_UDP_PORT);
