@@ -1,8 +1,8 @@
 #include "PondController.h"
 #include <commonstruct.h>
 
-PondController::PondController(String name, Adafruit_SSD1306 *display)
-    : BaseComp(name), _display(display)
+PondController::PondController(String name, Adafruit_SSD1306 *display, bool displayOk)
+    : BaseComp(name), _display(display), _displayOk(displayOk)
 {
     loadSettings();
     setInterval(0, 1000);  // call action() every second
@@ -133,6 +133,7 @@ void PondController::action()
 
 void PondController::displayStatus()
 {
+    if (!_displayOk) return;
     struct tm timeinfo;
     bool timeValid = getLocalTime(&timeinfo);
 

@@ -48,6 +48,7 @@ PondController *pond;
 EventBus       *eb;
 DS18B20        *tempWater;
 DS18B20        *tempAir;
+bool            displayOk = false;
 
 AsyncWebServer server(OTA_PORT);
 
@@ -175,13 +176,11 @@ void setup()
         Serial.println("ArduinoOTA ready");
     }
 
-    // OLED
-    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-    {
-        Serial.println(F("SSD1306 allocation failed"));
-        for (;;);
-    }
+    // OLED — non-fatal: device boots and OTA works even without display
     Wire.setTimeOut(3000);
+    displayOk = display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+    if (!displayOk)
+        Serial.println(F("SSD1306 not found — continuing without display"));
 
     // EventBus + components
     sensors.begin();
@@ -194,7 +193,7 @@ void setup()
     tempAir->setId(SENSOR_ID_AIR);
 
     logger = new RemoteLogger(ESP32_PondControl, webServerIP, ESP_UDP_PORT);
-    pond   = new PondController("PondCtrl", &display);
+    pond   = new PondController("PondCtrl", &display, displayOk);
     pond->attachLogger(logger);
 
     // All components on the EventBus — DS18B20 emits, PondController listens

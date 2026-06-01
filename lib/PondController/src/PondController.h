@@ -14,7 +14,7 @@
 class PondController : public BaseComp
 {
 public:
-    PondController(String name, Adafruit_SSD1306 *display);
+    PondController(String name, Adafruit_SSD1306 *display, bool displayOk = true);
 
     void action();
     void handleEvent(eventstruct e);
@@ -47,6 +47,7 @@ private:
     void checkFeedingTime(struct tm &ti);
 
     Adafruit_SSD1306 *_display;
+    bool              _displayOk;
     Preferences       _prefs;
 
     float _waterTemp = -99.0f;
