@@ -18,8 +18,9 @@ PondController::PondController(String name, DigitalOut *relayPump1, DigitalOut *
 void PondController::loadSettings()
 {
     _prefs.begin("pond", true);
-    _feedAmount1 = _prefs.getInt("feed1", 0);
-    _feedAmount2 = _prefs.getInt("feed2", 0);
+    _feedAmount1    = _prefs.getInt("feed1", 0);
+    _feedAmount2    = _prefs.getInt("feed2", 0);
+    _pumpOffMinutes = _prefs.getInt("pumpOff", 300);
     strlcpy(_feedTime1, _prefs.getString("time1", "08:00").c_str(), sizeof(_feedTime1));
     strlcpy(_feedTime2, _prefs.getString("time2", "18:00").c_str(), sizeof(_feedTime2));
     _prefs.end();
@@ -28,21 +29,24 @@ void PondController::loadSettings()
 void PondController::saveSettings()
 {
     _prefs.begin("pond", false);
-    _prefs.putInt("feed1", _feedAmount1);
-    _prefs.putInt("feed2", _feedAmount2);
+    _prefs.putInt("feed1",   _feedAmount1);
+    _prefs.putInt("feed2",   _feedAmount2);
+    _prefs.putInt("pumpOff", _pumpOffMinutes);
     _prefs.putString("time1", _feedTime1);
     _prefs.putString("time2", _feedTime2);
     _prefs.end();
     log80("Settings saved: feed1=" + String(_feedAmount1) +
           "g feed2=" + String(_feedAmount2) +
           "g time1=" + String(_feedTime1) +
-          " time2=" + String(_feedTime2));
+          " time2=" + String(_feedTime2) +
+          " pumpOff=" + String(_pumpOffMinutes) + "min");
 }
 
-void PondController::applySettings(int feed1, int feed2, const char* time1, const char* time2)
+void PondController::applySettings(int feed1, int feed2, const char* time1, const char* time2, int pumpOffMinutes)
 {
-    _feedAmount1 = constrain(feed1, 0, 100);
-    _feedAmount2 = constrain(feed2, 0, 100);
+    _feedAmount1    = constrain(feed1, 0, 100);
+    _feedAmount2    = constrain(feed2, 0, 100);
+    _pumpOffMinutes = constrain(pumpOffMinutes, 0, 600);
     strlcpy(_feedTime1, time1, sizeof(_feedTime1));
     strlcpy(_feedTime2, time2, sizeof(_feedTime2));
     saveSettings();  // persist and log once
@@ -110,12 +114,12 @@ void PondController::feedNow(int amount)
     // Pump1 off, Pump2 on for 5 hours during feeding
     _relayPump1->setOutput(false);
     _relayPump2->setOutput(true);
-    _pumpRestoreTime = millis() + 5UL * 60UL * 60UL * 1000UL;
+    _pumpRestoreTime = millis() + (unsigned long)_pumpOffMinutes * 60UL * 1000UL;
 
     // Feeder on for amount seconds (1g = 1s), auto-off via DigitalOut timer
     _relayFeeder->setOnInMillis(amount * 1000);
 
-    log80("Feeding: " + String(amount) + "g (" + String(amount) + "s), Pump2 on for 5h");
+    log80("Feeding: " + String(amount) + "g, Pump1 off for " + String(_pumpOffMinutes) + "min");
 }
 
 // ── Feeding time check ────────────────────────────────────────────────────────

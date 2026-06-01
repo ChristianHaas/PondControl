@@ -321,7 +321,8 @@ void loop()
                 pond->applySettings(incomingSettings.feedAmount1,
                                     incomingSettings.feedAmount2,
                                     incomingSettings.feedTime1,
-                                    incomingSettings.feedTime2);
+                                    incomingSettings.feedTime2,
+                                    incomingSettings.pumpOffMinutes);
                 logger->log80("Settings received via UDP");
                 sendPondStatus();
             }

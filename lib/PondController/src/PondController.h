@@ -29,7 +29,9 @@ public:
     const char* getFeedTime2() const { return _feedTime2; }
 
     // Apply all settings at once — persists and logs only once
-    void applySettings(int feed1, int feed2, const char* time1, const char* time2);
+    void applySettings(int feed1, int feed2, const char* time1, const char* time2, int pumpOffMinutes);
+
+    int getPumpOffMinutes() const { return _pumpOffMinutes; }
 
     // Individual setters (persist to flash — use applySettings when changing multiple)
     void setFeedAmount1(int v);
@@ -56,6 +58,8 @@ private:
     int  _feedAmount2 = 0;
     char _feedTime1[6] = "08:00";
     char _feedTime2[6] = "18:00";
+
+    int  _pumpOffMinutes = 300;   // default 5 hours
 
     // feeding-time dedup: store last day-of-year each slot was triggered
     int  _lastFedDoy1 = -1;
