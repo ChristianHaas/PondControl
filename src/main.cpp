@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <basecomp.h>
 #include <event.h>
+#include <digitalOut.h>
 #include <onewire.h>
 #include <DallasTemperature.h>
 #include <DS18B20.h>
@@ -20,6 +21,11 @@
 #include "ota_config.h"
 #include <Logger.h>
 #include "PondController.h"
+
+// ── GPIO pin assignments ───────────────────────────────────────────────────────
+#define PIN_RELAY_PUMP1   25   // Relay Pump1  (invers: LOW = relay ON)
+#define PIN_RELAY_PUMP2   26   // Relay Pump2
+#define PIN_RELAY_FEEDER  27   // Relay Feeder
 
 // ── Sensor IDs (used in DS18B20 events to identify which sensor fired) ────────
 #define SENSOR_ID_WATER 1
@@ -42,6 +48,9 @@ PondController *pond;
 EventBus       *eb;
 DS18B20        *tempWater;
 DS18B20        *tempAir;
+DigitalOut     *relayPump1;
+DigitalOut     *relayPump2;
+DigitalOut     *relayFeeder;
 
 AsyncWebServer server(OTA_PORT);
 
@@ -260,13 +269,24 @@ void setup()
     tempAir = new DS18B20("TempAir", &sensors, addrAir);
     tempAir->setId(SENSOR_ID_AIR);
 
+    // Relays: invers=true (active LOW — standard relay module wiring)
+    relayPump1  = new DigitalOut("Pump1",  PIN_RELAY_PUMP1,  false, true);
+    relayPump2  = new DigitalOut("Pump2",  PIN_RELAY_PUMP2,  false, true);
+    relayFeeder = new DigitalOut("Feeder", PIN_RELAY_FEEDER, false, true);
+
     logger = new RemoteLogger(ESP32_PondControl, webServerIP, ESP_UDP_PORT);
-    pond   = new PondController("PondCtrl");
+    pond   = new PondController("PondCtrl", relayPump1, relayPump2, relayFeeder);
     pond->attachLogger(logger);
 
-    // All components on the EventBus — DS18B20 emits, PondController listens
+    // All components on the EventBus
+    // DS18B20: emits temperature events
+    // Relays: need onLoop() called so setOnInMillis() timer works
+    // PondController: listens for events and calls action() every second
     eb->attach(tempWater);
     eb->attach(tempAir);
+    eb->attach(relayPump1);
+    eb->attach(relayPump2);
+    eb->attach(relayFeeder);
     eb->attachListener(pond);
 
     logger->log80("Pond Controller started: " + WiFi.localIP().toString());

@@ -2,6 +2,7 @@
 #define POND_CONTROLLER_H
 
 #include <BaseComp.h>
+#include <DigitalOut.h>
 #include <Preferences.h>
 #include <time.h>
 #include <EventType.h>
@@ -13,10 +14,11 @@
 class PondController : public BaseComp
 {
 public:
-    PondController(String name);
+    PondController(String name, DigitalOut *relayPump1, DigitalOut *relayPump2, DigitalOut *relayFeeder);
 
     void action();
     void handleEvent(eventstruct e);
+    void feedNow(int amount);   // Pump1 off, Pump2 on for 5h, feeder on for amount seconds
 
     // Getters
     float getWaterTemp()       const { return _waterTemp; }
@@ -39,6 +41,11 @@ private:
     void saveSettings();
     void loadSettings();
     void checkFeedingTime(struct tm &ti);
+
+    DigitalOut       *_relayPump1;
+    DigitalOut       *_relayPump2;
+    DigitalOut       *_relayFeeder;
+    unsigned long     _pumpRestoreTime = 0;  // millis() when Pump1 resumes and Pump2 stops
 
     Preferences _prefs;
 

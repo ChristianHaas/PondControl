@@ -1,11 +1,16 @@
 #include "PondController.h"
 #include <commonstruct.h>
 
-PondController::PondController(String name)
-    : BaseComp(name)
+PondController::PondController(String name, DigitalOut *relayPump1, DigitalOut *relayPump2, DigitalOut *relayFeeder)
+    : BaseComp(name), _relayPump1(relayPump1), _relayPump2(relayPump2), _relayFeeder(relayFeeder)
 {
     loadSettings();
     setInterval(0, 1000);  // call action() every second via EventBus
+
+    // Normal state: Pump1 on, Pump2 off, feeder off
+    _relayPump1->setOutput(true);
+    _relayPump2->setOutput(false);
+    _relayFeeder->setOutput(false);
 }
 
 // ── Settings persistence ──────────────────────────────────────────────────────
@@ -96,6 +101,23 @@ void PondController::handleEvent(eventstruct e)
     }
 }
 
+// ── Feeding ───────────────────────────────────────────────────────────────────
+
+void PondController::feedNow(int amount)
+{
+    if (amount <= 0) return;
+
+    // Pump1 off, Pump2 on for 5 hours during feeding
+    _relayPump1->setOutput(false);
+    _relayPump2->setOutput(true);
+    _pumpRestoreTime = millis() + 5UL * 60UL * 60UL * 1000UL;
+
+    // Feeder on for amount seconds (1g = 1s), auto-off via DigitalOut timer
+    _relayFeeder->setOnInMillis(amount * 1000);
+
+    log80("Feeding: " + String(amount) + "g (" + String(amount) + "s), Pump2 on for 5h");
+}
+
 // ── Feeding time check ────────────────────────────────────────────────────────
 
 void PondController::checkFeedingTime(struct tm &ti)
@@ -107,13 +129,13 @@ void PondController::checkFeedingTime(struct tm &ti)
     if (strcmp(now, _feedTime1) == 0 && _feedAmount1 > 0 && doy != _lastFedDoy1)
     {
         _lastFedDoy1 = doy;
-        log80("Feeding 1: " + String(_feedAmount1) + "g at " + String(now));
+        feedNow(_feedAmount1);
     }
 
     if (strcmp(now, _feedTime2) == 0 && _feedAmount2 > 0 && doy != _lastFedDoy2)
     {
         _lastFedDoy2 = doy;
-        log80("Feeding 2: " + String(_feedAmount2) + "g at " + String(now));
+        feedNow(_feedAmount2);
     }
 }
 
@@ -121,6 +143,15 @@ void PondController::checkFeedingTime(struct tm &ti)
 
 void PondController::action()
 {
+    // Restore normal pump state after 5-hour feeding pause
+    if (_pumpRestoreTime > 0 && millis() >= _pumpRestoreTime)
+    {
+        _relayPump2->setOutput(false);
+        _relayPump1->setOutput(true);
+        _pumpRestoreTime = 0;
+        log80("Pumps restored: Pump1 on, Pump2 off");
+    }
+
     struct tm timeinfo;
     if (getLocalTime(&timeinfo, 0))  // timeout=0: non-blocking
         checkFeedingTime(timeinfo);
