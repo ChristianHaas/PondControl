@@ -3,7 +3,6 @@
 #include <event.h>
 #include <onewire.h>
 #include <DallasTemperature.h>
-#include <DS18B20.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -43,8 +42,6 @@ WiFiUDP   udp;
 RemoteLogger   *logger;
 PondController *pond;
 EventBus       *eb;
-DS18B20        *tempWater;
-DS18B20        *tempAir;
 
 AsyncWebServer server(OTA_PORT);
 
@@ -171,10 +168,7 @@ void setup()
     sensors.begin();
     sensors.setWaitForConversion(false);  // do not block during requestTemperatures()
     eb = new EventBus();
-    tempWater = new DS18B20("TempWater", &sensors, addrWater);
-    tempAir   = new DS18B20("TempAir",   &sensors, addrAir);
-    eb->attach(tempWater);
-    eb->attach(tempAir);
+    // Temperatures are polled directly in loop() — no EventBus attachment needed.
 
     // OLED
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
@@ -225,8 +219,13 @@ void loop()
 
     eb->onLoop();
 
-    // Call PondController action (feeding time check, display update)
-    pond->action();
+    // Call PondController action (feeding time check, display update) once per second
+    static unsigned long lastActionTime = 0;
+    if (now - lastActionTime >= 1000)
+    {
+        pond->action();
+        lastActionTime = now;
+    }
 
     // Incoming UDP packets (settings from web server)
     int packetSize = udp.parsePacket();
