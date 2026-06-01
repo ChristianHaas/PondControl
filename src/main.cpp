@@ -63,7 +63,7 @@ void sendPondStatus()
     strlcpy(pondMsg.feedTime1, pond->getFeedTime1(), sizeof(pondMsg.feedTime1));
     strlcpy(pondMsg.feedTime2, pond->getFeedTime2(), sizeof(pondMsg.feedTime2));
     struct tm timeinfo;
-    if (getLocalTime(&timeinfo))
+    if (getLocalTime(&timeinfo, 0))  // timeout=0: non-blocking, never stalls the loop
         snprintf(pondMsg.currentTime, sizeof(pondMsg.currentTime), "%02d:%02d:%02d",
                  timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     else

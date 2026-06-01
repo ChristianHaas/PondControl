@@ -122,6 +122,6 @@ void PondController::checkFeedingTime(struct tm &ti)
 void PondController::action()
 {
     struct tm timeinfo;
-    if (getLocalTime(&timeinfo))
+    if (getLocalTime(&timeinfo, 0))  // timeout=0: non-blocking
         checkFeedingTime(timeinfo);
 }
