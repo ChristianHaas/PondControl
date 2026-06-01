@@ -48,8 +48,8 @@ struct_pond_message    pondMsg;
 struct_pond_settings   incomingSettings;
 
 // ── NTP ───────────────────────────────────────────────────────────────────────
-const char* ntpServer      = "de.pool.ntp.org";  // German pool — faster/more reliable locally
-const char* ntpServer2     = "time.google.com";   // fallback
+const char* ntpServer      = "192.168.68.1";    // router — works even if port 123 is blocked externally
+const char* ntpServer2     = "de.pool.ntp.org"; // internet fallback
 const long  gmtOffset_sec  = 3600;   // UTC+1 (CET)
 const int   daylightOffset = 3600;   // +1 h DST (CEST summer)
 
