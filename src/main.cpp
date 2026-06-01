@@ -74,8 +74,9 @@ void sendPondStatus()
 // ── WiFi watchdog ─────────────────────────────────────────────────────────────
 void checkWiFiConnection()
 {
-    static unsigned long lastCheck = 0;
-    static bool wasDisconnected = false;
+    static unsigned long lastCheck         = 0;
+    static unsigned long disconnectedSince = 0;
+    static bool wasDisconnected            = false;
 
     if (millis() - lastCheck < 10000) return;
     lastCheck = millis();
@@ -84,9 +85,21 @@ void checkWiFiConnection()
     {
         if (!wasDisconnected)
         {
-            wasDisconnected = true;
+            wasDisconnected   = true;
+            disconnectedSince = millis();
             Serial.println("WiFi disconnected — reconnecting...");
         }
+
+        // After 2 minutes with no connection, force a full restart.
+        if (millis() - disconnectedSince > 120000)
+        {
+            Serial.println("WiFi lost for 2 min — restarting...");
+            if (logger) logger->log80("WiFi lost 2 min, restarting");
+            delay(200);
+            ESP.restart();
+        }
+
+        WiFi.disconnect(false);
         WiFi.reconnect();
     }
     else if (wasDisconnected)
