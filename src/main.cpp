@@ -9,6 +9,8 @@
 #include <esp_task_wdt.h>
 #include <time.h>
 #include <esp_sntp.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include "commonstruct.h"
 #include "udp_config.h"
 #include <AsyncTCP.h>
@@ -48,10 +50,14 @@ struct_pond_message    pondMsg;
 struct_pond_settings   incomingSettings;
 
 // ── NTP ───────────────────────────────────────────────────────────────────────
-const char* ntpServer      = "192.168.68.1";    // router — works even if port 123 is blocked externally
-const char* ntpServer2     = "de.pool.ntp.org"; // internet fallback
-const long  gmtOffset_sec  = 3600;   // UTC+1 (CET)
-const int   daylightOffset = 3600;   // +1 h DST (CEST summer)
+// Timezone: CET (UTC+1) with automatic DST to CEST (UTC+2)
+// POSIX TZ string covers both winter and summer time
+#define TZ_STRING "CET-1CEST,M3.5.0,M10.5.0/3"
+
+const char* ntpServer      = "192.168.68.1";    // router NTP (kept as fallback)
+const char* ntpServer2     = "de.pool.ntp.org";
+const long  gmtOffset_sec  = 3600;
+const int   daylightOffset = 3600;
 
 // ── UDP send ──────────────────────────────────────────────────────────────────
 void sendPondStatus()
@@ -115,10 +121,48 @@ void checkWiFiConnection()
         wasDisconnected = false;
         udp.stop();
         udp.begin(ESP_UDP_PORT);
-        configTime(gmtOffset_sec, daylightOffset, ntpServer, ntpServer2);
+        syncTimeFromWebServer();
         Serial.println("WiFi reconnected: " + WiFi.localIP().toString());
         if (logger) logger->log80("WiFi reconnected: " + WiFi.localIP().toString());
     }
+}
+
+// ── Time sync from HomeWebServerV2 ────────────────────────────────────────────
+bool syncTimeFromWebServer()
+{
+    HTTPClient http;
+    http.begin("http://192.168.68.200/api/time");
+    http.setTimeout(3000);
+    int code = http.GET();
+    if (code != 200) {
+        Serial.printf("Time sync HTTP error: %d\n", code);
+        http.end();
+        return false;
+    }
+    StaticJsonDocument<64> doc;
+    if (deserializeJson(doc, http.getString()) != DeserializationError::Ok) {
+        Serial.println("Time sync JSON parse error");
+        http.end();
+        return false;
+    }
+    http.end();
+
+    long epoch = doc["epoch"] | 0L;
+    if (epoch < 1000000000L) {
+        Serial.println("Time sync: invalid epoch from server");
+        return false;
+    }
+
+    struct timeval tv = { (time_t)epoch, 0 };
+    settimeofday(&tv, nullptr);
+
+    struct tm ti;
+    getLocalTime(&ti, 0);
+    char buf[32];
+    strftime(buf, sizeof(buf), "%H:%M:%S", &ti);
+    Serial.println("Time synced from web server: " + String(buf));
+    if (logger) logger->log80("Time synced: " + String(buf));
+    return true;
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -150,15 +194,13 @@ void setup()
     Serial.println("Connected! IP: " + WiFi.localIP().toString());
     WiFi.setSleep(false);
 
-    sntp_set_time_sync_notification_cb([](struct timeval *tv) {
-        struct tm ti;
-        localtime_r(&tv->tv_sec, &ti);
-        char buf[32];
-        strftime(buf, sizeof(buf), "%H:%M:%S", &ti);
-        Serial.println("NTP synced: " + String(buf));
-    });
-    configTime(gmtOffset_sec, daylightOffset, ntpServer, ntpServer2);
-    Serial.println("NTP sync requested from " + String(ntpServer));
+    // Set timezone (POSIX TZ string handles both CET winter and CEST summer automatically)
+    setenv("TZ", TZ_STRING, 1);
+    tzset();
+    // Try NTP as opportunistic fallback; primary sync is via HTTP from web server
+    configTime(0, 0, ntpServer, ntpServer2);
+    // Sync time from HomeWebServerV2 (reliable on local network, no port 123 needed)
+    syncTimeFromWebServer();
 
     udp.begin(ESP_UDP_PORT);
     Serial.printf("UDP listening on port %d\n", ESP_UDP_PORT);
@@ -272,6 +314,15 @@ void loop()
                 pond->handleEvent(e);
             }
         }
+    }
+
+    // Periodic time re-sync from web server (every hour, or until first successful sync)
+    static unsigned long lastTimeSync = 0;
+    static bool timeSynced = false;
+    unsigned long syncInterval = timeSynced ? 3600000UL : 30000UL; // retry every 30s until synced
+    if (millis() - lastTimeSync >= syncInterval) {
+        if (syncTimeFromWebServer()) timeSynced = true;
+        lastTimeSync = millis();
     }
 
     // Periodic status broadcast
