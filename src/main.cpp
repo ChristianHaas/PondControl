@@ -167,8 +167,9 @@ void setup()
         Serial.println("ArduinoOTA ready");
     }
 
-    // DS18B20
+    // DS18B20 — non-blocking async conversion
     sensors.begin();
+    sensors.setWaitForConversion(false);  // do not block during requestTemperatures()
     eb = new EventBus();
     tempWater = new DS18B20("TempWater", &sensors, addrWater);
     tempAir   = new DS18B20("TempAir",   &sensors, addrAir);
@@ -201,14 +202,26 @@ void loop()
 
     checkWiFiConnection();
 
-    // Read DS18B20 temperatures and push into PondController
-    // DS18B20::action() fires the event bus; we intercept via EventBus listener.
-    // Simpler: poll directly and set on pond.
-    sensors.requestTemperatures();
-    float wt = sensors.getTempC(addrWater);
-    float at = sensors.getTempC(addrAir);
-    if (wt != DEVICE_DISCONNECTED_C) pond->setWaterTemp(wt);
-    if (at != DEVICE_DISCONNECTED_C) pond->setAirTemp(at);
+    // DS18B20 non-blocking: request conversion every second,
+    // then read result after ≥800 ms have passed.
+    static unsigned long tempRequestTime = 0;
+    static bool tempRequested = false;
+    unsigned long now = millis();
+
+    if (!tempRequested)
+    {
+        sensors.requestTemperatures();
+        tempRequestTime = now;
+        tempRequested = true;
+    }
+    else if (now - tempRequestTime >= 800)
+    {
+        float wt = sensors.getTempC(addrWater);
+        float at = sensors.getTempC(addrAir);
+        if (wt != DEVICE_DISCONNECTED_C) pond->setWaterTemp(wt);
+        if (at != DEVICE_DISCONNECTED_C) pond->setAirTemp(at);
+        tempRequested = false;  // trigger next request on next iteration
+    }
 
     eb->onLoop();
 
