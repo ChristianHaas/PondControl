@@ -34,6 +34,15 @@ void PondController::saveSettings()
           " time2=" + String(_feedTime2));
 }
 
+void PondController::applySettings(int feed1, int feed2, const char* time1, const char* time2)
+{
+    _feedAmount1 = constrain(feed1, 0, 100);
+    _feedAmount2 = constrain(feed2, 0, 100);
+    strlcpy(_feedTime1, time1, sizeof(_feedTime1));
+    strlcpy(_feedTime2, time2, sizeof(_feedTime2));
+    saveSettings();  // persist and log once
+}
+
 void PondController::setFeedAmount1(int v)
 {
     _feedAmount1 = constrain(v, 0, 100);

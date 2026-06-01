@@ -227,10 +227,10 @@ void loop()
             if (msgType == POND_SETTINGS && len == (int)sizeof(struct_pond_settings))
             {
                 memcpy(&incomingSettings, buf, sizeof(struct_pond_settings));
-                pond->setFeedAmount1(incomingSettings.feedAmount1);
-                pond->setFeedAmount2(incomingSettings.feedAmount2);
-                pond->setFeedTime1(incomingSettings.feedTime1);
-                pond->setFeedTime2(incomingSettings.feedTime2);
+                pond->applySettings(incomingSettings.feedAmount1,
+                                    incomingSettings.feedAmount2,
+                                    incomingSettings.feedTime1,
+                                    incomingSettings.feedTime2);
                 logger->log80("Settings received via UDP");
                 sendPondStatus();
             }

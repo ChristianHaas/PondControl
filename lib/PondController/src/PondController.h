@@ -27,7 +27,10 @@ public:
     const char* getFeedTime1() const { return _feedTime1; }
     const char* getFeedTime2() const { return _feedTime2; }
 
-    // Settings setters (also persist to flash)
+    // Apply all settings at once — persists and logs only once
+    void applySettings(int feed1, int feed2, const char* time1, const char* time2);
+
+    // Individual setters (also persist to flash — use applySettings when changing multiple)
     void setFeedAmount1(int v);
     void setFeedAmount2(int v);
     void setFeedTime1(const char* t);
