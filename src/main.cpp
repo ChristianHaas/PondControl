@@ -8,6 +8,7 @@
 #include <WiFiUDP.h>
 #include <esp_task_wdt.h>
 #include <time.h>
+#include <esp_sntp.h>
 #include "commonstruct.h"
 #include "udp_config.h"
 #include <AsyncTCP.h>
@@ -149,6 +150,13 @@ void setup()
     Serial.println("Connected! IP: " + WiFi.localIP().toString());
     WiFi.setSleep(false);
 
+    sntp_set_time_sync_notification_cb([](struct timeval *tv) {
+        struct tm ti;
+        localtime_r(&tv->tv_sec, &ti);
+        char buf[32];
+        strftime(buf, sizeof(buf), "%H:%M:%S", &ti);
+        Serial.println("NTP synced: " + String(buf));
+    });
     configTime(gmtOffset_sec, daylightOffset, ntpServer, ntpServer2);
     Serial.println("NTP sync requested from " + String(ntpServer));
 
