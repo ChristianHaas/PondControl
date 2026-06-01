@@ -4,9 +4,6 @@
 #include <onewire.h>
 #include <DallasTemperature.h>
 #include <DS18B20.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include <WiFi.h>
 #include <WiFiUDP.h>
 #include <esp_task_wdt.h>
@@ -25,12 +22,6 @@
 #define SENSOR_ID_WATER 1
 #define SENSOR_ID_AIR   2
 
-// ── OLED ──────────────────────────────────────────────────────────────────────
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
 // ── DS18B20 – both sensors share one OneWire bus (pin 4) ─────────────────────
 // Replace these addresses with the actual addresses found by a bus scan.
 OneWire oneWire(4);
@@ -48,7 +39,6 @@ PondController *pond;
 EventBus       *eb;
 DS18B20        *tempWater;
 DS18B20        *tempAir;
-bool            displayOk = false;
 
 AsyncWebServer server(OTA_PORT);
 
@@ -164,10 +154,10 @@ void setup()
         ArduinoOTA.setPassword(OTA_PASSWORD);
         ArduinoOTA.onStart([]() {
             Serial.println("OTA update starting...");
-            esp_task_wdt_reset();   // prevent watchdog from firing at start
+            esp_task_wdt_reset();
         });
         ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-            esp_task_wdt_reset();   // keep watchdog alive during flash write
+            esp_task_wdt_reset();
             Serial.printf("OTA progress: %u%%\r", progress * 100 / total);
         });
         ArduinoOTA.onEnd([]()   { Serial.println("\nOTA update done."); });
@@ -175,12 +165,6 @@ void setup()
         ArduinoOTA.begin();
         Serial.println("ArduinoOTA ready");
     }
-
-    // OLED — non-fatal: device boots and OTA works even without display
-    Wire.setTimeOut(3000);
-    displayOk = display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-    if (!displayOk)
-        Serial.println(F("SSD1306 not found — continuing without display"));
 
     // EventBus + components
     sensors.begin();
@@ -193,7 +177,7 @@ void setup()
     tempAir->setId(SENSOR_ID_AIR);
 
     logger = new RemoteLogger(ESP32_PondControl, webServerIP, ESP_UDP_PORT);
-    pond   = new PondController("PondCtrl", &display, displayOk);
+    pond   = new PondController("PondCtrl");
     pond->attachLogger(logger);
 
     // All components on the EventBus — DS18B20 emits, PondController listens

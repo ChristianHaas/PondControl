@@ -1,11 +1,11 @@
 #include "PondController.h"
 #include <commonstruct.h>
 
-PondController::PondController(String name, Adafruit_SSD1306 *display, bool displayOk)
-    : BaseComp(name), _display(display), _displayOk(displayOk)
+PondController::PondController(String name)
+    : BaseComp(name)
 {
     loadSettings();
-    setInterval(0, 1000);  // call action() every second
+    setInterval(0, 1000);  // call action() every second via EventBus
 }
 
 // ── Settings persistence ──────────────────────────────────────────────────────
@@ -100,10 +100,9 @@ void PondController::handleEvent(eventstruct e)
 
 void PondController::checkFeedingTime(struct tm &ti)
 {
-    // Build "HH:MM" string for current time
     char now[6];
     snprintf(now, sizeof(now), "%02d:%02d", ti.tm_hour, ti.tm_min);
-    int doy = ti.tm_yday;   // day-of-year, resets to 0 on Jan 1
+    int doy = ti.tm_yday;
 
     if (strcmp(now, _feedTime1) == 0 && _feedAmount1 > 0 && doy != _lastFedDoy1)
     {
@@ -118,57 +117,11 @@ void PondController::checkFeedingTime(struct tm &ti)
     }
 }
 
-// ── Periodic action (every second) ───────────────────────────────────────────
+// ── Periodic action (every second via EventBus) ───────────────────────────────
 
 void PondController::action()
 {
     struct tm timeinfo;
     if (getLocalTime(&timeinfo))
         checkFeedingTime(timeinfo);
-
-    displayStatus();
-}
-
-// ── OLED display ──────────────────────────────────────────────────────────────
-
-void PondController::displayStatus()
-{
-    if (!_displayOk) return;
-    struct tm timeinfo;
-    bool timeValid = getLocalTime(&timeinfo);
-
-    _display->clearDisplay();
-    _display->setTextSize(1);
-    _display->setTextColor(WHITE);
-    _display->setCursor(0, 0);
-
-    if (timeValid)
-    {
-        char buf[9];
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-        _display->println(buf);
-    }
-    else
-    {
-        _display->println("Time: --:--:--");
-    }
-
-    _display->setTextSize(2);
-    _display->setCursor(0, 12);
-    if (_waterTemp > -90)
-        _display->println("W:" + String(_waterTemp, 1));
-    else
-        _display->println("W: ---");
-
-    _display->setCursor(0, 32);
-    if (_airTemp > -90)
-        _display->println("L:" + String(_airTemp, 1));
-    else
-        _display->println("L: ---");
-
-    _display->setTextSize(1);
-    _display->setCursor(0, 52);
-    _display->println(String(_feedTime1) + " " + String(_feedAmount1) + "g  " +
-                      String(_feedTime2) + " " + String(_feedAmount2) + "g");
-    _display->display();
 }

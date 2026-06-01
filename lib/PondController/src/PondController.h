@@ -2,7 +2,6 @@
 #define POND_CONTROLLER_H
 
 #include <BaseComp.h>
-#include <Adafruit_SSD1306.h>
 #include <Preferences.h>
 #include <time.h>
 #include <EventType.h>
@@ -14,28 +13,23 @@
 class PondController : public BaseComp
 {
 public:
-    PondController(String name, Adafruit_SSD1306 *display, bool displayOk = true);
+    PondController(String name);
 
     void action();
     void handleEvent(eventstruct e);
-    void displayStatus();
-
-    // Sensor data setters (called from main loop)
-    void setWaterTemp(float t) { _waterTemp = t; }
-    void setAirTemp(float t)   { _airTemp   = t; }
 
     // Getters
-    float getWaterTemp()    const { return _waterTemp; }
-    float getAirTemp()      const { return _airTemp; }
-    int   getFeedAmount1()  const { return _feedAmount1; }
-    int   getFeedAmount2()  const { return _feedAmount2; }
+    float getWaterTemp()       const { return _waterTemp; }
+    float getAirTemp()         const { return _airTemp; }
+    int   getFeedAmount1()     const { return _feedAmount1; }
+    int   getFeedAmount2()     const { return _feedAmount2; }
     const char* getFeedTime1() const { return _feedTime1; }
     const char* getFeedTime2() const { return _feedTime2; }
 
     // Apply all settings at once — persists and logs only once
     void applySettings(int feed1, int feed2, const char* time1, const char* time2);
 
-    // Individual setters (also persist to flash — use applySettings when changing multiple)
+    // Individual setters (persist to flash — use applySettings when changing multiple)
     void setFeedAmount1(int v);
     void setFeedAmount2(int v);
     void setFeedTime1(const char* t);
@@ -46,9 +40,7 @@ private:
     void loadSettings();
     void checkFeedingTime(struct tm &ti);
 
-    Adafruit_SSD1306 *_display;
-    bool              _displayOk;
-    Preferences       _prefs;
+    Preferences _prefs;
 
     float _waterTemp = -99.0f;
     float _airTemp   = -99.0f;
