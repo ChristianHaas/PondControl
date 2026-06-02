@@ -47,6 +47,8 @@ void PondController::applySettings(int feed1, int feed2, const char* time1, cons
     _feedAmount1    = constrain(feed1, 0, 100);
     _feedAmount2    = constrain(feed2, 0, 100);
     _pumpOffMinutes = constrain(pumpOffMinutes, 0, 600);
+    if (strcmp(_feedTime1, time1) != 0) _lastFedDoy1 = -1;  // allow re-trigger today
+    if (strcmp(_feedTime2, time2) != 0) _lastFedDoy2 = -1;
     strlcpy(_feedTime1, time1, sizeof(_feedTime1));
     strlcpy(_feedTime2, time2, sizeof(_feedTime2));
     saveSettings();  // persist and log once
@@ -66,12 +68,14 @@ void PondController::setFeedAmount2(int v)
 
 void PondController::setFeedTime1(const char* t)
 {
+    if (strcmp(_feedTime1, t) != 0) _lastFedDoy1 = -1;  // allow re-trigger today
     strlcpy(_feedTime1, t, sizeof(_feedTime1));
     saveSettings();
 }
 
 void PondController::setFeedTime2(const char* t)
 {
+    if (strcmp(_feedTime2, t) != 0) _lastFedDoy2 = -1;  // allow re-trigger today
     strlcpy(_feedTime2, t, sizeof(_feedTime2));
     saveSettings();
 }

@@ -79,9 +79,10 @@ void sendPondStatus()
     pondMsg.feedAmount2    = pond->getFeedAmount2();
     strlcpy(pondMsg.feedTime1, pond->getFeedTime1(), sizeof(pondMsg.feedTime1));
     strlcpy(pondMsg.feedTime2, pond->getFeedTime2(), sizeof(pondMsg.feedTime2));
-    pondMsg.pump1State   = pond->isPump1On();
-    pondMsg.pump2State   = pond->isPump2On();
-    pondMsg.feederState  = pond->isFeederOn();
+    pondMsg.pump1State      = pond->isPump1On();
+    pondMsg.pump2State      = pond->isPump2On();
+    pondMsg.feederState     = pond->isFeederOn();
+    pondMsg.pumpOffMinutes  = pond->getPumpOffMinutes();
     struct tm timeinfo;
     if (getLocalTime(&timeinfo, 0))  // timeout=0: non-blocking, never stalls the loop
         snprintf(pondMsg.currentTime, sizeof(pondMsg.currentTime), "%02d:%02d:%02d",
