@@ -22,6 +22,33 @@
 #include <Logger.h>
 #include "PondController.h"
 
+// ── Independent hardware-timer watchdog ───────────────────────────────────────
+// Fires even if the main task is blocked on a mutex/semaphore or in an ISR.
+// loop() must call feedHwWatchdog() at least every 15 s or the device restarts.
+static hw_timer_t *_hwWatchdog = nullptr;
+
+void IRAM_ATTR hwWatchdogISR()
+{
+    ets_printf("HW watchdog: loop frozen — restarting\n");
+    esp_restart();
+}
+
+void initHwWatchdog()
+{
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+    _hwWatchdog = timerBegin(1000000);                       // 1 MHz
+    timerAttachInterrupt(_hwWatchdog, &hwWatchdogISR);
+    timerAlarm(_hwWatchdog, 15000000ULL, false, 0);          // 15 s one-shot
+#else
+    _hwWatchdog = timerBegin(0, 80, true);                   // 1 MHz
+    timerAttachInterrupt(_hwWatchdog, &hwWatchdogISR, true);
+    timerAlarmWrite(_hwWatchdog, 15000000ULL, false);
+    timerAlarmEnable(_hwWatchdog);
+#endif
+}
+
+inline void feedHwWatchdog() { timerWrite(_hwWatchdog, 0); }
+
 // ── GPIO pin assignments ───────────────────────────────────────────────────────
 #define PIN_RELAY_PUMP1   25   // Relay Pump1  (invers: LOW = relay ON)
 #define PIN_RELAY_PUMP2   26   // Relay Pump2
@@ -185,9 +212,23 @@ bool syncTimeFromWebServer()
 void setup()
 {
     Serial.begin(115200);
+    delay(500);
+    Serial.printf("\n=== PondControl build %s %s ===\n", __DATE__, __TIME__);
 
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+    // Watch the idle task of every core present (0b1 single-core, 0b11 dual-core)
+    esp_task_wdt_config_t twdtConfig = {
+        .timeout_ms     = 30000,
+        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+        .trigger_panic  = true };
+    esp_task_wdt_reconfigure(&twdtConfig);   // TWDT already inited by core 3.x
+#else
     esp_task_wdt_init(30, true);
-    esp_task_wdt_add(NULL);
+#endif
+    esp_task_wdt_add(NULL);   // subscribe the loop task (required before esp_task_wdt_reset)
+
+    // Independent timer-based watchdog — fires even if main task is blocked
+    initHwWatchdog();
 
     WiFi.mode(WIFI_STA);
     IPAddress local_IP(192, 168, 68, ESP32_PondControl_IP);
@@ -241,9 +282,11 @@ void setup()
         ArduinoOTA.onStart([]() {
             Serial.println("OTA update starting...");
             esp_task_wdt_reset();
+            feedHwWatchdog();
         });
         ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
             esp_task_wdt_reset();
+            feedHwWatchdog();
             Serial.printf("OTA progress: %u%%\r", progress * 100 / total);
         });
         ArduinoOTA.onEnd([]()   { Serial.println("\nOTA update done."); });
@@ -294,6 +337,7 @@ void setup()
     eb->attachListener(pond);
 
     logger->log80("Pond Controller started: " + WiFi.localIP().toString());
+    logger->log80("Build " + String(__DATE__) + " " + String(__TIME__));
     Serial.println("Setup done");
 }
 
@@ -301,6 +345,7 @@ void setup()
 void loop()
 {
     esp_task_wdt_reset();
+    feedHwWatchdog();   // independent of TWDT — restarts if loop stops for 15 s
 
     if (OTA_ENABLED) ArduinoOTA.handle();
 
