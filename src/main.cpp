@@ -8,6 +8,7 @@
 #include <WiFi.h>
 #include <WiFiUDP.h>
 #include <esp_task_wdt.h>
+#include "rtc_wdt.h"     // IDF 5.x path (was soc/rtc_wdt.h on IDF 4.x)
 #include <time.h>
 #include <esp_sntp.h>
 #include <HTTPClient.h>
@@ -22,32 +23,25 @@
 #include <Logger.h>
 #include "PondController.h"
 
-// ── Independent hardware-timer watchdog ───────────────────────────────────────
-// Fires even if the main task is blocked on a mutex/semaphore or in an ISR.
-// loop() must call feedHwWatchdog() at least every 15 s or the device restarts.
-static hw_timer_t *_hwWatchdog = nullptr;
-
-void IRAM_ATTR hwWatchdogISR()
-{
-    ets_printf("HW watchdog: loop frozen — restarting\n");
-    esp_restart();
-}
+// ── Independent RTC hardware watchdog ─────────────────────────────────────────
+// The RTC WDT is a silicon-level watchdog in the always-on RTC domain. It resets
+// the chip by hardware even if the CPU is fully wedged or interrupts are disabled
+// — the most robust recovery available. loop() must call feedHwWatchdog() at
+// least every 15 s (also fed during OTA) or the device hard-resets.
+#define RTC_WDT_TIMEOUT_MS 15000
 
 void initHwWatchdog()
 {
-#if ESP_ARDUINO_VERSION_MAJOR >= 3
-    _hwWatchdog = timerBegin(1000000);                       // 1 MHz
-    timerAttachInterrupt(_hwWatchdog, &hwWatchdogISR);
-    timerAlarm(_hwWatchdog, 15000000ULL, false, 0);          // 15 s one-shot
-#else
-    _hwWatchdog = timerBegin(0, 80, true);                   // 1 MHz
-    timerAttachInterrupt(_hwWatchdog, &hwWatchdogISR, true);
-    timerAlarmWrite(_hwWatchdog, 15000000ULL, false);
-    timerAlarmEnable(_hwWatchdog);
-#endif
+    rtc_wdt_protect_off();
+    rtc_wdt_disable();
+    rtc_wdt_set_length_of_reset_signal(RTC_WDT_SYS_RESET_SIG, RTC_WDT_LENGTH_3_2us);
+    rtc_wdt_set_stage(RTC_WDT_STAGE0, RTC_WDT_STAGE_ACTION_RESET_SYSTEM);
+    rtc_wdt_set_time(RTC_WDT_STAGE0, RTC_WDT_TIMEOUT_MS);
+    rtc_wdt_enable();
+    rtc_wdt_protect_on();
 }
 
-inline void feedHwWatchdog() { timerWrite(_hwWatchdog, 0); }
+inline void feedHwWatchdog() { rtc_wdt_feed(); }
 
 // ── GPIO pin assignments ───────────────────────────────────────────────────────
 #define PIN_RELAY_PUMP1   25   // Relay Pump1  (invers: LOW = relay ON)
