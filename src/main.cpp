@@ -62,8 +62,8 @@ inline void feedHwWatchdog() { timerWrite(_hwWatchdog, 0); }
 // Replace these addresses with the actual addresses found by a bus scan.
 OneWire oneWire(4);
 DallasTemperature sensors(&oneWire);
-DeviceAddress addrWater = {0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
-DeviceAddress addrAir   = {0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02};
+DeviceAddress addrWater = {0x28, 0x78, 0xAC, 0xAE, 0x63, 0x20, 0x01, 0x57};
+DeviceAddress addrAir   = {0x28, 0xFF, 0xFA, 0x87, 0x60, 0x17, 0x05, 0x14};
 
 // ── Network ───────────────────────────────────────────────────────────────────
 IPAddress webServerIP(192, 168, 68, ESP32_WebServer_IP);
@@ -217,9 +217,12 @@ void setup()
 
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
     // Watch the idle task of every core present (0b1 single-core, 0b11 dual-core)
+    // idle_core_mask = 0: do NOT watch idle tasks. Arduino loop() busy-runs and
+    // never yields to IDLE1, which would falsely trip the watchdog. We watch the
+    // loop task itself via esp_task_wdt_add(NULL) below — that catches real hangs.
     esp_task_wdt_config_t twdtConfig = {
         .timeout_ms     = 30000,
-        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+        .idle_core_mask = 0,
         .trigger_panic  = true };
     esp_task_wdt_reconfigure(&twdtConfig);   // TWDT already inited by core 3.x
 #else
@@ -298,15 +301,22 @@ void setup()
     // EventBus + components
     sensors.begin();
     eb = new EventBus();
+    logger = new RemoteLogger(ESP32_PondControl, webServerIP, ESP_UDP_PORT);
 
-    // Print found DS18B20 addresses on serial so they can be copied into the code
+    // Scan the OneWire bus and report found DS18B20 addresses to serial AND the
+    // web UI logs, so the real address can be copied into addrWater/addrAir.
     int deviceCount = sensors.getDeviceCount();
     Serial.printf("DS18B20 devices found: %d\n", deviceCount);
+    logger->log80("DS18B20 devices found: " + String(deviceCount));
     for (int i = 0; i < deviceCount; i++) {
         DeviceAddress addr;
         if (sensors.getAddress(addr, i)) {
-            Serial.printf("  Sensor %d: {0x%02X,0x%02X,0x%02X,0x%02X,0x%02X,0x%02X,0x%02X,0x%02X}\n",
+            char hex[64];
+            snprintf(hex, sizeof(hex),
+                "S%d 0x%02X,0x%02X,0x%02X,0x%02X,0x%02X,0x%02X,0x%02X,0x%02X",
                 i, addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7]);
+            Serial.println(hex);
+            logger->log80(String(hex));
         }
     }
 
@@ -321,7 +331,6 @@ void setup()
     relayPump2  = new DigitalOut("Pump2",  PIN_RELAY_PUMP2,  false, true);
     relayFeeder = new DigitalOut("Feeder", PIN_RELAY_FEEDER, false, true);
 
-    logger = new RemoteLogger(ESP32_PondControl, webServerIP, ESP_UDP_PORT);
     pond   = new PondController("PondCtrl", relayPump1, relayPump2, relayFeeder);
     pond->attachLogger(logger);
 
