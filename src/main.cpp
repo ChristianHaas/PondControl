@@ -43,6 +43,12 @@ void initHwWatchdog()
 
 inline void feedHwWatchdog() { rtc_wdt_feed(); }
 
+// Pause/resume the RTC WDT around OTA so a slow/stalled upload can never reset
+// the chip mid-flash. On a successful OTA the device reboots (WDT re-inits in
+// setup); resume is only needed if the OTA fails.
+void pauseHwWatchdog()  { rtc_wdt_protect_off(); rtc_wdt_disable(); rtc_wdt_protect_on(); }
+void resumeHwWatchdog() { initHwWatchdog(); }
+
 // ── GPIO pin assignments ───────────────────────────────────────────────────────
 #define PIN_RELAY_PUMP1   25   // Relay Pump1  (invers: LOW = relay ON)
 #define PIN_RELAY_PUMP2   26   // Relay Pump2
@@ -268,8 +274,10 @@ void setup()
                   { request->send(200, "text/plain", "Resetting now..."); ESP.restart(); });
         ElegantOTA.setAuth(OTA_USERNAME, OTA_PASSWORD);
         ElegantOTA.begin(&server);
+        ElegantOTA.onStart([]() { pauseHwWatchdog(); });
         ElegantOTA.onEnd([](bool success) {
             if (success) { delay(500); ESP.restart(); }
+            else         { resumeHwWatchdog(); }   // failed — re-arm watchdog
         });
         server.begin();
         Serial.println("HTTP server started");
@@ -278,16 +286,18 @@ void setup()
         ArduinoOTA.setPassword(OTA_PASSWORD);
         ArduinoOTA.onStart([]() {
             Serial.println("OTA update starting...");
+            pauseHwWatchdog();        // RTC WDT off for the whole upload
             esp_task_wdt_reset();
-            feedHwWatchdog();
         });
         ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-            esp_task_wdt_reset();
-            feedHwWatchdog();
+            esp_task_wdt_reset();     // keep the 30s task WDT happy while loop() is blocked
             Serial.printf("OTA progress: %u%%\r", progress * 100 / total);
         });
         ArduinoOTA.onEnd([]()   { Serial.println("\nOTA update done."); });
-        ArduinoOTA.onError([](ota_error_t error) { Serial.printf("OTA error[%u]\n", error); });
+        ArduinoOTA.onError([](ota_error_t error) {
+            Serial.printf("OTA error[%u]\n", error);
+            resumeHwWatchdog();   // failed — re-arm watchdog
+        });
         ArduinoOTA.begin();
         Serial.println("ArduinoOTA ready");
     }
