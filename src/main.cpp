@@ -50,9 +50,10 @@ void pauseHwWatchdog()  { rtc_wdt_protect_off(); rtc_wdt_disable(); rtc_wdt_prot
 void resumeHwWatchdog() { initHwWatchdog(); }
 
 // ── GPIO pin assignments ───────────────────────────────────────────────────────
-#define PIN_RELAY_PUMP1   25   // Relay Pump1  (invers: LOW = relay ON)
-#define PIN_RELAY_PUMP2   26   // Relay Pump2
-#define PIN_RELAY_FEEDER  27   // Relay Feeder
+#define PIN_RELAY_PUMP1    25   // Relay Pump1  (invers: LOW = relay ON)
+#define PIN_RELAY_PUMP2    26   // Relay Pump2
+#define PIN_RELAY_FEEDER   27   // Relay Feeder
+#define PIN_RELAY_AIRPUMP  18   // Relay AirPump
 
 // ── Sensor IDs (used in DS18B20 events to identify which sensor fired) ────────
 #define SENSOR_ID_WATER 1
@@ -62,8 +63,8 @@ void resumeHwWatchdog() { initHwWatchdog(); }
 // Replace these addresses with the actual addresses found by a bus scan.
 OneWire oneWire(4);
 DallasTemperature sensors(&oneWire);
-DeviceAddress addrWater = {0x28, 0x78, 0xAC, 0xAE, 0x63, 0x20, 0x01, 0x57};
-DeviceAddress addrAir   = {0x28, 0xFF, 0xFA, 0x87, 0x60, 0x17, 0x05, 0x14};
+DeviceAddress addrWater = {0x28, 0xFF, 0xFA, 0x87, 0x60, 0x17, 0x05, 0x14};
+DeviceAddress addrAir   = {0x28, 0x78, 0xAC, 0xAE, 0x63, 0x20, 0x01, 0x57};
 
 // ── Network ───────────────────────────────────────────────────────────────────
 IPAddress webServerIP(192, 168, 68, ESP32_WebServer_IP);
@@ -78,6 +79,7 @@ DS18B20        *tempAir;
 DigitalOut     *relayPump1;
 DigitalOut     *relayPump2;
 DigitalOut     *relayFeeder;
+DigitalOut     *relayAirPump;
 
 AsyncWebServer server(OTA_PORT);
 
@@ -109,6 +111,7 @@ void sendPondStatus()
     pondMsg.pump1State      = pond->isPump1On();
     pondMsg.pump2State      = pond->isPump2On();
     pondMsg.feederState     = pond->isFeederOn();
+    pondMsg.airPumpState    = pond->isAirPumpOn();
     pondMsg.pumpOffMinutes  = pond->getPumpOffMinutes();
     struct tm timeinfo;
     if (getLocalTime(&timeinfo, 0))  // timeout=0: non-blocking, never stalls the loop
@@ -331,11 +334,12 @@ void setup()
     tempAir->setId(SENSOR_ID_AIR);
 
     // Relays: invers=true (active LOW — standard relay module wiring)
-    relayPump1  = new DigitalOut("Pump1",  PIN_RELAY_PUMP1,  false, true);
-    relayPump2  = new DigitalOut("Pump2",  PIN_RELAY_PUMP2,  false, true);
-    relayFeeder = new DigitalOut("Feeder", PIN_RELAY_FEEDER, false, true);
+    relayPump1   = new DigitalOut("Pump1",    PIN_RELAY_PUMP1,   false, true);
+    relayPump2   = new DigitalOut("Pump2",    PIN_RELAY_PUMP2,   false, true);
+    relayFeeder  = new DigitalOut("Feeder",   PIN_RELAY_FEEDER,  false, true);
+    relayAirPump = new DigitalOut("AirPump",  PIN_RELAY_AIRPUMP, false, true);
 
-    pond   = new PondController("PondCtrl", relayPump1, relayPump2, relayFeeder);
+    pond   = new PondController("PondCtrl", relayPump1, relayPump2, relayFeeder, relayAirPump);
     pond->attachLogger(logger);
 
     // All components on the EventBus
@@ -347,6 +351,7 @@ void setup()
     eb->attach(relayPump1);
     eb->attach(relayPump2);
     eb->attach(relayFeeder);
+    eb->attach(relayAirPump);
     eb->attachListener(pond);
 
     logger->log80("Pond Controller started: " + WiFi.localIP().toString());
