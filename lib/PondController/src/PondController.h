@@ -14,7 +14,7 @@
 class PondController : public BaseComp
 {
 public:
-    PondController(String name, DigitalOut *relayPump1, DigitalOut *relayPump2, DigitalOut *relayFeeder);
+    PondController(String name, DigitalOut *relayPump1, DigitalOut *relayPump2, DigitalOut *relayFeeder, DigitalOut *relayAirPump);
 
     void action();
     void handleEvent(eventstruct e);
@@ -35,6 +35,7 @@ public:
     bool isPump1On()         const { return _relayPump1->getStatus(); }
     bool isPump2On()         const { return _relayPump2->getStatus(); }
     bool isFeederOn()        const { return _relayFeeder->getStatus(); }
+    bool isAirPumpOn()       const { return _relayAirPump->getStatus(); }
 
     // Individual setters (persist to flash — use applySettings when changing multiple)
     void setFeedAmount1(int v);
@@ -46,11 +47,14 @@ private:
     void saveSettings();
     void loadSettings();
     void checkFeedingTime(struct tm &ti);
+    void checkAirPump(struct tm &ti);
 
     DigitalOut       *_relayPump1;
     DigitalOut       *_relayPump2;
     DigitalOut       *_relayFeeder;
-    unsigned long     _pumpRestoreTime = 0;  // millis() when Pump1 resumes and Pump2 stops
+    DigitalOut       *_relayAirPump;
+    unsigned long     _pumpRestoreTime      = 0;
+    unsigned long     _airPumpOverrideUntil = 0;  // millis() until manual override expires
 
     Preferences _prefs;
 

@@ -1,16 +1,17 @@
 #include "PondController.h"
 #include <commonstruct.h>
 
-PondController::PondController(String name, DigitalOut *relayPump1, DigitalOut *relayPump2, DigitalOut *relayFeeder)
-    : BaseComp(name), _relayPump1(relayPump1), _relayPump2(relayPump2), _relayFeeder(relayFeeder)
+PondController::PondController(String name, DigitalOut *relayPump1, DigitalOut *relayPump2, DigitalOut *relayFeeder, DigitalOut *relayAirPump)
+    : BaseComp(name), _relayPump1(relayPump1), _relayPump2(relayPump2), _relayFeeder(relayFeeder), _relayAirPump(relayAirPump)
 {
     loadSettings();
     setInterval(0, 1000);  // call action() every second via EventBus
 
-    // Normal state: Pump1 on, Pump2 off, feeder off
+    // Normal state: Pump1 on, Pump2 off, feeder off, air pump off (schedule controls it)
     _relayPump1->setOutput(true);
     _relayPump2->setOutput(false);
     _relayFeeder->setOutput(false);
+    _relayAirPump->setOutput(false);
 }
 
 // ── Settings persistence ──────────────────────────────────────────────────────
@@ -105,6 +106,35 @@ void PondController::handleEvent(eventstruct e)
         case event_code_pond_update_settings:
             // settings applied via applySettings() from main.cpp
             break;
+        case event_code_pond_force_skimmer:
+            _pumpRestoreTime = 0;
+            _relayPump1->setOutput(true);
+            _relayPump2->setOutput(false);
+            log80("Force: Skimmer on, pause cancelled");
+            break;
+        case event_code_pond_force_pump2:
+            _relayPump1->setOutput(false);
+            _relayPump2->setOutput(true);
+            _pumpRestoreTime = millis() + (unsigned long)_pumpOffMinutes * 60UL * 1000UL;
+            log80("Force: Pump2 on, Skimmer paused " + String(_pumpOffMinutes) + "min");
+            break;
+        case event_code_pond_feed_now:
+            {
+                int amount = max(1, (int)(_feedAmount1 * 0.3f + 0.5f));
+                feedNow(amount);
+                log80("FeedNow: " + String(amount) + "g (30% of " + String(_feedAmount1) + "g)");
+            }
+            break;
+        case event_code_pond_airpump_on:
+            _airPumpOverrideUntil = millis() + 4UL * 3600UL * 1000UL;
+            _relayAirPump->setOutput(true);
+            log80("AirPump: manual ON (4h override)");
+            break;
+        case event_code_pond_airpump_off:
+            _airPumpOverrideUntil = millis() + 4UL * 3600UL * 1000UL;
+            _relayAirPump->setOutput(false);
+            log80("AirPump: manual OFF (4h override)");
+            break;
         }
     }
 }
@@ -120,8 +150,8 @@ void PondController::feedNow(int amount)
     _relayPump2->setOutput(true);
     _pumpRestoreTime = millis() + (unsigned long)_pumpOffMinutes * 60UL * 1000UL;
 
-    // Feeder on for amount seconds (1g = 1s), auto-off via DigitalOut timer
-    _relayFeeder->setOnInMillis(amount * 1000);
+    // Feeder on for amount/3 seconds (1s ≈ 3g), auto-off via DigitalOut timer
+    _relayFeeder->setOnInMillis(amount * 1000 / 3);
 
     log80("Feeding: " + String(amount) + "g, Pump1 off for " + String(_pumpOffMinutes) + "min");
 }
@@ -147,11 +177,44 @@ void PondController::checkFeedingTime(struct tm &ti)
     }
 }
 
+// ── Air pump schedule ─────────────────────────────────────────────────────────
+// Returns true if 'nowMinutes' falls in [startMinutes, endMinutes) where the
+// window may cross midnight (e.g. 23:00 → 05:00).
+static bool inTimeWindow(int nowMin, int startMin, int endMin)
+{
+    if (startMin < endMin)
+        return nowMin >= startMin && nowMin < endMin;
+    // crosses midnight
+    return nowMin >= startMin || nowMin < endMin;
+}
+
+void PondController::checkAirPump(struct tm &ti)
+{
+    if (_waterTemp < -90.0f) return;
+    if (millis() < _airPumpOverrideUntil) return;  // manual override active
+
+    int nowMin = ti.tm_hour * 60 + ti.tm_min;
+
+    bool shouldBeOn = false;
+    if (_waterTemp >= 20.0f)
+        shouldBeOn = inTimeWindow(nowMin, 23 * 60, 8 * 60);   // 23:00 – 08:00 (9 h)
+    else if (_waterTemp >= 18.0f)
+        shouldBeOn = inTimeWindow(nowMin, 23 * 60, 5 * 60);   // 23:00 – 05:00 (6 h)
+
+    bool currentlyOn = _relayAirPump->getStatus();
+    if (shouldBeOn != currentlyOn)
+    {
+        _relayAirPump->setOutput(shouldBeOn);
+        log80(String("AirPump ") + (shouldBeOn ? "ON" : "OFF") +
+              " water=" + String(_waterTemp, 1) + "C");
+    }
+}
+
 // ── Periodic action (every second via EventBus) ───────────────────────────────
 
 void PondController::action()
 {
-    // Restore normal pump state after 5-hour feeding pause
+    // Restore normal pump state after feeding pause
     if (_pumpRestoreTime > 0 && millis() >= _pumpRestoreTime)
     {
         _relayPump2->setOutput(false);
@@ -162,5 +225,8 @@ void PondController::action()
 
     struct tm timeinfo;
     if (getLocalTime(&timeinfo, 0))  // timeout=0: non-blocking
+    {
         checkFeedingTime(timeinfo);
+        checkAirPump(timeinfo);
+    }
 }
