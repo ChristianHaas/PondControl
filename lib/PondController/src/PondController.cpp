@@ -196,7 +196,9 @@ void PondController::checkAirPump(struct tm &ti)
     int nowMin = ti.tm_hour * 60 + ti.tm_min;
 
     bool shouldBeOn = false;
-    if (_waterTemp >= 20.0f)
+    if (_waterTemp >= 25.0f)
+        shouldBeOn = true;                                     // > 25°C: always on
+    else if (_waterTemp >= 20.0f)
         shouldBeOn = inTimeWindow(nowMin, 23 * 60, 8 * 60);   // 23:00 – 08:00 (9 h)
     else if (_waterTemp >= 18.0f)
         shouldBeOn = inTimeWindow(nowMin, 23 * 60, 5 * 60);   // 23:00 – 05:00 (6 h)
