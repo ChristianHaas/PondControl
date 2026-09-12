@@ -87,6 +87,95 @@ static uint32_t messageCounter = 0;
 struct_pond_message    pondMsg;
 struct_pond_settings   incomingSettings;
 
+// ── Loop-Timing-Statistik (24-h-Fenster) ─────────────────────────────────────
+static unsigned long loopLastUs     = 0;   // micros() beim letzten loop()-Aufruf
+static uint64_t      loopSumUs      = 0;   // Summe aller Dauern im aktuellen Fenster
+static uint32_t      loopCount      = 0;   // Anzahl gemessener Intervalle
+static uint32_t      loopMaxUs      = 0;   // Maximum im aktuellen Fenster
+static unsigned long loopWindowStart = 0;  // millis() beim letzten Reset
+
+void updateLoopStats()
+{
+    unsigned long now = micros();
+    if (loopLastUs == 0) { loopLastUs = now; loopWindowStart = millis(); return; }
+    uint32_t dt = (uint32_t)(now - loopLastUs);
+    loopLastUs = now;
+
+    if (millis() - loopWindowStart >= 86400000UL) {  // 24 h abgelaufen → Fenster neu
+        loopSumUs = 0; loopCount = 0; loopMaxUs = 0;
+        loopWindowStart = millis();
+    }
+    loopSumUs += dt;
+    loopCount++;
+    if (dt > loopMaxUs) loopMaxUs = dt;
+}
+
+String buildStatusPage()
+{
+    float meanUs = (loopCount > 0) ? (float)loopSumUs / loopCount : 0.0f;
+
+    unsigned long uptimeSec = millis() / 1000;
+    unsigned long h = uptimeSec / 3600;
+    unsigned long m = (uptimeSec % 3600) / 60;
+    unsigned long s = uptimeSec % 60;
+
+    char timeBuf[20] = "--:--:--";
+    struct tm ti;
+    if (getLocalTime(&ti, 0))
+        strftime(timeBuf, sizeof(timeBuf), "%d.%m.%Y %H:%M:%S", &ti);
+
+    String html =
+        "<!DOCTYPE html><html><head>"
+        "<meta charset='UTF-8'>"
+        "<meta http-equiv='refresh' content='5'>"
+        "<title>PondControl</title>"
+        "<style>"
+        "body{font-family:monospace;margin:20px;background:#f8f8f8;}"
+        "h2{color:#224466;} h3{color:#336;margin-top:1.2em;}"
+        "table{border-collapse:collapse;min-width:320px;}"
+        "td{padding:3px 14px;border-bottom:1px solid #ddd;}"
+        "td:first-child{color:#555;}"
+        ".on{color:green;font-weight:bold;} .off{color:#aaa;}"
+        "</style></head><body>"
+        "<h2>PondControl</h2>"
+        "<p>Build: " + String(__DATE__) + " " + String(__TIME__) + "<br>"
+        "Zeit: " + String(timeBuf) + "<br>"
+        "Uptime: " + String(h) + "h " + String(m) + "m " + String(s) + "s<br>"
+        "WiFi: " + WiFi.localIP().toString() + " &nbsp; RSSI: " + String(WiFi.RSSI()) + " dBm</p>"
+
+        "<h3>Temperaturen</h3><table>"
+        "<tr><td>Wasser</td><td>" + String(pond ? pond->getWaterTemp() : -99.0f, 1) + " °C</td></tr>"
+        "<tr><td>Luft</td><td>"   + String(pond ? pond->getAirTemp()   : -99.0f, 1) + " °C</td></tr>"
+        "</table>"
+
+        "<h3>Relais</h3><table>"
+        "<tr><td>Pumpe 1 (Skimmer)</td><td class='" + String(pond && pond->isPump1On()  ? "on'>AN" : "off'>AUS") + "</td></tr>"
+        "<tr><td>Pumpe 2</td><td class='"            + String(pond && pond->isPump2On()  ? "on'>AN" : "off'>AUS") + "</td></tr>"
+        "<tr><td>Futterautomat</td><td class='"      + String(pond && pond->isFeederOn() ? "on'>AN" : "off'>AUS") + "</td></tr>"
+        "<tr><td>Luftpumpe</td><td class='"          + String(pond && pond->isAirPumpOn()? "on'>AN" : "off'>AUS") + "</td></tr>"
+        "</table>"
+
+        "<h3>Fütterung</h3><table>"
+        "<tr><td>Menge 1 / Zeit</td><td>" + String(pond ? pond->getFeedAmount1() : 0) + " g &nbsp; " + String(pond ? pond->getFeedTime1() : "--:--") + "</td></tr>"
+        "<tr><td>Menge 2 / Zeit</td><td>" + String(pond ? pond->getFeedAmount2() : 0) + " g &nbsp; " + String(pond ? pond->getFeedTime2() : "--:--") + "</td></tr>"
+        "<tr><td>Pumpe-Pause</td><td>"    + String(pond ? pond->getPumpOffMinutes() : 0) + " min</td></tr>"
+        "</table>"
+
+        "<h3>Loop-Statistik (" + String((millis() - loopWindowStart) / 60000UL) + " min Fenster, max 24 h)</h3><table>"
+        "<tr><td>Mittlere Dauer</td><td>" + String(meanUs, 0)        + " µs (" + String(meanUs / 1000.0f, 2) + " ms)</td></tr>"
+        "<tr><td>Maximale Dauer</td><td>" + String(loopMaxUs)        + " µs (" + String(loopMaxUs / 1000.0f, 2) + " ms)</td></tr>"
+        "<tr><td>Messungen</td><td>"      + String(loopCount)        + "</td></tr>"
+        "</table>"
+
+        "<h3>Kommunikation</h3><table>"
+        "<tr><td>Gesendete Pakete</td><td>" + String(messageCounter) + "</td></tr>"
+        "</table>"
+
+        "<p style='margin-top:2em'><a href='/update'>OTA Update</a></p>"
+        "</body></html>";
+    return html;
+}
+
 // ── NTP ───────────────────────────────────────────────────────────────────────
 // Timezone: CET (UTC+1) with automatic DST to CEST (UTC+2)
 // POSIX TZ string covers both winter and summer time
@@ -132,11 +221,29 @@ void sendPondStatus()
 bool syncTimeFromWebServer();
 
 // ── WiFi watchdog ─────────────────────────────────────────────────────────────
+// Faellt das Netz aus, wird NICHT neu gestartet: der Controller arbeitet weiter
+// und sucht im Hintergrund die Verbindung. (Der frueher hier stehende Reboot nach
+// 2 min stammte aus einer Absturzserie, deren Ursache Schaltspitzen der Relais
+// waren - die sind seit dem RC-Glied an den Relais weg. Bei einem echten
+// Netzausfall schadet ein Reboot nur: er loescht den Betriebszustand, obwohl die
+// Steuerung ohne Netz einwandfrei weiterlaufen koennte.)
+//
+// Gegen den Fall, dass nicht das Netz weg ist, sondern der WLAN-Stack des ESP
+// haengt (WiFi.reconnect() kehrt dann nie in den verbundenen Zustand zurueck),
+// hilft die Eskalationsstufe: alle 10 erfolglosen Versuche wird der Stack
+// komplett aus- und wieder eingeschaltet - dieselbe Wirkung wie ein Reboot, aber
+// ohne Verlust des Betriebszustands.
+#define WIFI_RETRY_FAST_MS     10000UL    // erste Minute: alle 10 s
+#define WIFI_RETRY_SLOW_MS     60000UL    // danach: jede Minute
+#define WIFI_STACK_RESET_EVERY 10         // nach so vielen Versuchen Stack neu aufsetzen
+
 void checkWiFiConnection()
 {
     static unsigned long lastCheck         = 0;
     static unsigned long disconnectedSince = 0;
-    static bool wasDisconnected            = false;
+    static unsigned long lastAttempt       = 0;
+    static uint32_t      attempts          = 0;
+    static bool          wasDisconnected   = false;
 
     if (millis() - lastCheck < 10000) return;
     lastCheck = millis();
@@ -147,20 +254,33 @@ void checkWiFiConnection()
         {
             wasDisconnected   = true;
             disconnectedSince = millis();
-            Serial.println("WiFi disconnected — reconnecting...");
+            lastAttempt       = 0;
+            attempts          = 0;
+            Serial.println("WiFi weg - Reconnect laeuft (kein Reboot)");
+            if (logger) logger->log80("WiFi weg - Reconnect laeuft (kein Reboot)");
         }
 
-        // After 2 minutes with no connection, force a full restart.
-        if (millis() - disconnectedSince > 120000)
+        unsigned long warte = (millis() - disconnectedSince < 60000UL)
+                            ? WIFI_RETRY_FAST_MS : WIFI_RETRY_SLOW_MS;
+        if (lastAttempt && millis() - lastAttempt < warte) return;
+        lastAttempt = millis();
+        attempts++;
+
+        if (attempts % WIFI_STACK_RESET_EVERY == 0)
         {
-            Serial.println("WiFi lost for 2 min — restarting...");
-            if (logger) logger->log80("WiFi lost 2 min, restarting");
+            Serial.println("WiFi-Stack neu aufsetzen (Versuch " + String(attempts) + ")");
+            if (logger) logger->log80("WiFi-Stack neu aufsetzen (Versuch " + String(attempts) + ")");
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
             delay(200);
-            ESP.restart();
+            WiFi.mode(WIFI_STA);
+            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         }
-
-        WiFi.disconnect(false);
-        WiFi.reconnect();
+        else
+        {
+            WiFi.disconnect(false);
+            WiFi.reconnect();
+        }
     }
     else if (wasDisconnected)
     {
@@ -168,8 +288,10 @@ void checkWiFiConnection()
         udp.stop();
         udp.begin(ESP_UDP_PORT);
         syncTimeFromWebServer();
-        Serial.println("WiFi reconnected: " + WiFi.localIP().toString());
-        if (logger) logger->log80("WiFi reconnected: " + WiFi.localIP().toString());
+        String meldung = "WiFi wieder da nach " + String((millis() - disconnectedSince) / 1000)
+                       + " s: " + WiFi.localIP().toString();
+        Serial.println(meldung);
+        if (logger) logger->log80(meldung);
     }
 }
 
@@ -272,7 +394,7 @@ void setup()
     if (OTA_ENABLED)
     {
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-                  { request->send(200, "text/plain", "Hi! I am Pond Controller."); });
+                  { request->send(200, "text/html", buildStatusPage()); });
         server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request)
                   { request->send(200, "text/plain", "Resetting now..."); ESP.restart(); });
         ElegantOTA.setAuth(OTA_USERNAME, OTA_PASSWORD);
@@ -362,6 +484,7 @@ void setup()
 // ── Loop ──────────────────────────────────────────────────────────────────────
 void loop()
 {
+    updateLoopStats();  // muss ganz am Anfang stehen — misst die Zeit seit dem letzten Aufruf
     esp_task_wdt_reset();
     feedHwWatchdog();   // independent of TWDT — restarts if loop stops for 15 s
 
