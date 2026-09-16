@@ -237,6 +237,26 @@ bool syncTimeFromWebServer();
 #define WIFI_RETRY_SLOW_MS     60000UL    // danach: jede Minute
 #define WIFI_STACK_RESET_EVERY 10         // nach so vielen Versuchen Stack neu aufsetzen
 
+// ── Statische IP setzen ───────────────────────────────────────────────────────
+// Muss vor JEDEM WiFi.begin() aufgerufen werden, nicht nur in setup():
+// WiFi.mode(WIFI_OFF) im Eskalationszweig von checkWiFiConnection() zerstoert
+// das netif samt IP-Konfiguration; danach ist der DHCP-Client wieder aktiv und
+// der Controller haengt auf einer beliebigen Adresse.
+// (Vorfall 14.09.2026, Heizungscontroller: nach 6 min WLAN-Ausfall kam der
+// Stack-Reset, danach lief er auf DHCP-Adresse .61 weiter. Sein Status kam beim
+// Hub weiter an - der filtert die Absender-IP nicht -, aber die Befehle des Hubs
+// gingen an die feste .204 ins Leere. Fiel nur zufaellig auf.)
+static const IPAddress STATIC_IP(192, 168, 68, ESP32_PondControl_IP);
+static const IPAddress STATIC_GATEWAY(192, 168, 68, 1);
+static const IPAddress STATIC_SUBNET(255, 255, 252, 0);
+
+void applyStaticIP()
+{
+    if (!WiFi.config(STATIC_IP, STATIC_GATEWAY, STATIC_SUBNET))
+        Serial.println("Static IP config failed, falling back to DHCP");
+    WiFi.setHostname("PondController");
+}
+
 void checkWiFiConnection()
 {
     static unsigned long lastCheck         = 0;
@@ -274,6 +294,7 @@ void checkWiFiConnection()
             WiFi.mode(WIFI_OFF);
             delay(200);
             WiFi.mode(WIFI_STA);
+            applyStaticIP();      // WIFI_OFF hat die statische IP geloescht
             WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         }
         else
@@ -292,6 +313,13 @@ void checkWiFiConnection()
                        + " s: " + WiFi.localIP().toString();
         Serial.println(meldung);
         if (logger) logger->log80(meldung);
+        if (!(WiFi.localIP() == STATIC_IP))
+        {
+            String warnung = "ACHTUNG falsche IP " + WiFi.localIP().toString()
+                           + " - Hub-Befehle kommen nicht an";
+            Serial.println(warnung);
+            if (logger) logger->log80(warnung);
+        }
     }
 }
 
@@ -359,14 +387,7 @@ void setup()
     initHwWatchdog();
 
     WiFi.mode(WIFI_STA);
-    IPAddress local_IP(192, 168, 68, ESP32_PondControl_IP);
-    IPAddress gateway(192, 168, 68, 1);
-    IPAddress subnet(255, 255, 252, 0);
-
-    if (!WiFi.config(local_IP, gateway, subnet))
-        Serial.println("Static IP config failed, falling back to DHCP");
-
-    WiFi.setHostname("PondController");
+    applyStaticIP();
     WiFi.setAutoReconnect(true);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.print("Connecting to WiFi");
